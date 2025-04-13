@@ -21,9 +21,9 @@
 
 
 // returns pos-th bit from seq
-static inline uint8_t get_bit(uint64_t *seq, size_t pos){
+static inline uint64_t get_bit(uint64_t const *seq, size_t pos){
     uint64_t val = seq[pos / 64];
-    return (uint8_t)(val & (1 << (pos % 64)));
+    return (val >> (pos % 64)) & (uint64_t)1;
 }
 
 // sets pos-th bit in seq to val
@@ -38,8 +38,9 @@ static size_t ceil_div64(size_t n){
     return n / 64 + (n % 64 != 0);
 }
 
+
 void * try_calloc64(size_t n){
-    uint64_t *p = (uint64_t*) calloc(ceil_div64(n), sizeof(uint64_t));
+    void *p = calloc(ceil_div64(n), sizeof(uint64_t));
     CHECK_NOT_NULL(p, NULL, ENOMEM);
     return p;
 }
@@ -56,9 +57,8 @@ static void id(uint64_t *output, uint64_t const *state, size_t m, size_t s){
     memcpy(output, state, sizeof(uint64_t) * ceil_div64(m));
 }
 
-
+// stores info about one bit of input
 typedef struct in_bit{
-    //uint8_t val; // if no automaton is connected, stores the value input
     moore_t* src_at; // source automaton
     size_t src_bit;  // from which bit of src_at take info
 } in_bit;
@@ -72,7 +72,7 @@ struct at_list_node{
 };
 
 
-// list of automatons
+// list of automatons to store in output bits, to know
 typedef struct at_list{
     
     at_list_node *head;
@@ -104,7 +104,7 @@ int push(at_list* list, moore_t *at, size_t in){
 }    
 
 
-typedef struct moore_t{
+typedef struct moore{
     
     size_t in_size, out_size, state_size;
     in_bit* in_bits;
@@ -116,12 +116,12 @@ typedef struct moore_t{
     
 } moore_t;
 
-
  
 void pop(at_list* list, moore_t *at){
     at_list_node *node = list->head;
+	if(node == NULL) return;
+	if(node->next == NULL) return;
     while(node->next->dst_at != at){
-        assert(node != NULL);
         node = node->next;
     }
     at_list_node *to_delete = node->next;
@@ -130,27 +130,20 @@ void pop(at_list* list, moore_t *at){
     free(to_delete);
 }
 
-void destr(at_list* list){
+static void destr(at_list* list){
+	if(list->head == NULL) return;
     while(list->head->next != NULL) pop(list, list->head->next->dst_at);
     free(list->head);
     list->head = NULL;
 }
-    
-static inline void fetch_input(moore_t *at){
+
+static void fetch_input(moore_t *at){
     for(size_t i = 0; i < at->in_size; i++){
         if(at->in_bits[i].src_at == NULL) continue;
         set_bit(at->in, i, get_bit(at->in_bits[i].src_at->out,
                                    at->in_bits[i].src_bit));
     }
 }
-
-/*static inline int calc_output(moore_t *at, uint64_t const *state){
-    uint64_t *new_output = (uint64_t*) try_calloc64(at->out_size);
-    if(new_output == NULL) return -1;
-    at->output_f(new_output, state, at->out_size, at->state_size);
-    memcpy(at->out, new_output, ceil_div64(at->out_size) * sizeof(uint64_t));
-    free(new_output);
-}*/
 
 
 moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t,
@@ -163,18 +156,18 @@ moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t,
     CHECK_NOT_NULL(q, NULL, EINVAL);
     
     moore_t *at = (moore_t*) malloc(sizeof(moore_t));
-    //moore_t tmp = {
-    at->in_size = n,
-    at->in = try_calloc64(n),
-    at->in_bits = (in_bit*) try_calloc(n, sizeof(in_bit)),
-    at->out_size = m,
-    at->out = try_calloc64(m),
-    at->out_bits = (at_list*) try_calloc(m, sizeof(at_list)),
-    at->state_size = s,
-    at->state = try_calloc64(s),
-    at->transition_f = t,
-    at->output_f = y
-    //};
+    CHECK_NOT_NULL(at, NULL, ENOMEM);
+	
+    at->in_size = n;
+    at->in = try_calloc64(n);
+    at->in_bits = (in_bit*) try_calloc(n, sizeof(in_bit));
+    at->out_size = m;
+    at->out = try_calloc64(m);
+    at->out_bits = (at_list*) try_calloc(m, sizeof(at_list));
+    at->state_size = s;
+    at->state = try_calloc64(s);
+    at->transition_f = t;
+    at->output_f = y;
     
     if(at->in == NULL || at->in_bits == NULL || at->out == NULL
                       || at->out_bits == NULL || at->state == NULL){
@@ -187,7 +180,9 @@ moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t,
         return NULL;
     }
     
-    //memcpy(at, &tmp, sizeof(moore_t));
+	for(size_t i = 0; i < at->out_size; i++){
+		at->out_bits[i].head = NULL;
+	}
         
     at->output_f(at->out, q, at->out_size, at->state_size);
     memcpy(at->state, q, sizeof(uint64_t) * ceil_div64(s));
@@ -211,7 +206,11 @@ void ma_delete(moore_t *a){
     for(size_t i = 0; i < a->out_size; i++){
         destr(&(a->out_bits[i]));
     }
-    
+    free(a->in);
+    free(a->in_bits);
+    free(a->out);
+    free(a->out_bits);
+    free(a->state);
     free(a);
 }
 
@@ -254,6 +253,7 @@ int ma_connect(moore_t *a_in, size_t in, moore_t *a_out, size_t out, size_t num)
             return -1;
         }
     }
+	free(old_input);
     
     return 0;    
 }
@@ -272,7 +272,7 @@ int ma_disconnect(moore_t *a_in, size_t in, size_t num){
     for(size_t i = in; i < in + num; i++){
         src = a_in->in_bits[i].src_at;
         if(src == NULL) continue;
-        pop(&(src->out_bits[a_in->in_bits[i].src_bit]), src);
+        pop(&(src->out_bits[a_in->in_bits[i].src_bit]), a_in);
     }
     
     return 0;
@@ -285,15 +285,11 @@ int ma_set_input(moore_t *a, uint64_t const *input){
     CHECK_NOT_ZERO(a->in_size, -1);
     CHECK_NOT_NULL(input, -1, EINVAL);
     
-    uint64_t *input_copy = (uint64_t*) try_calloc64(a->in_size);
-    if(input_copy == NULL) return -1;
-    
     for(size_t i = 0; i < a->in_size; i++){
         if(a->in_bits[i].src_at == NULL){
-            set_bit(a->in, i, get_bit(input_copy, i));
+            set_bit(a->in, i, get_bit(input, i));
         }
     }
-    free(input_copy);
     
     return 0;
 }
@@ -303,7 +299,6 @@ int ma_set_state(moore_t *a, uint64_t const *state){
     CHECK_NOT_NULL(a, -1, EINVAL);
     CHECK_NOT_NULL(state, -1, EINVAL);
     
-    //if(calc_output(a, state) == -1) return -1;
     a->output_f(a->out, state, a->out_size, a->state_size);
     memcpy(a->state, state, ceil_div64(a->state_size) * sizeof(uint64_t));
     
