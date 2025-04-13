@@ -23,7 +23,7 @@
 // returns pos-th bit from seq
 static inline uint8_t get_bit(uint64_t *seq, size_t pos){
     uint64_t val = seq[pos / 64];
-    return val & (1 << (pos % 64));
+    return (uint8_t)(val & (1 << (pos % 64)));
 }
 
 // sets pos-th bit in seq to val
@@ -104,7 +104,7 @@ int push(at_list* list, moore_t *at, size_t in){
 }    
 
 
-typedef struct moore{
+typedef struct moore_t{
     
     size_t in_size, out_size, state_size;
     in_bit* in_bits;
@@ -163,18 +163,18 @@ moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t,
     CHECK_NOT_NULL(q, NULL, EINVAL);
     
     moore_t *at = (moore_t*) malloc(sizeof(moore_t));
-    moore_t tmp = {
-        .in_size = n,
-        .in = try_calloc64(n),
-        .in_bits = (in_bit*) try_calloc(n, sizeof(in_bit)),
-        .out_size = m,
-        .out = try_calloc64(m),
-        .out_bits = (at_list*) try_calloc(m, sizeof(at_list)),
-        .state_size = s,
-        .state = try_calloc64(s),
-        .transition_f = t,
-        .output_f = y
-    };
+    //moore_t tmp = {
+    at->in_size = n,
+    at->in = try_calloc64(n),
+    at->in_bits = (in_bit*) try_calloc(n, sizeof(in_bit)),
+    at->out_size = m,
+    at->out = try_calloc64(m),
+    at->out_bits = (at_list*) try_calloc(m, sizeof(at_list)),
+    at->state_size = s,
+    at->state = try_calloc64(s),
+    at->transition_f = t,
+    at->output_f = y
+    //};
     
     if(at->in == NULL || at->in_bits == NULL || at->out == NULL
                       || at->out_bits == NULL || at->state == NULL){
@@ -187,7 +187,7 @@ moore_t * ma_create_full(size_t n, size_t m, size_t s, transition_function_t t,
         return NULL;
     }
     
-    memcpy(at, &tmp, sizeof(moore_t));
+    //memcpy(at, &tmp, sizeof(moore_t));
         
     at->output_f(at->out, q, at->out_size, at->state_size);
     memcpy(at->state, q, sizeof(uint64_t) * ceil_div64(s));
